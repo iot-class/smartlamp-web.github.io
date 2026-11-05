@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lamp Smart Control</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Paho MQTT -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#151e2e',
+                            900: '#0f172a',
+                        },
+                        neon: {
+                            yellow: '#facc15',
+                            blue: '#3b82f6',
+                            red: '#ef4444',
+                            green: '#22c55e'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Import Google Font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Custom Scrollbar for numeric input */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+
+        .glow-on {
+            color: #facc15;
+            filter: drop-shadow(0 0 20px rgba(250, 204, 21, 0.7));
+        }
+
+        .glow-off {
+            color: #475569;
+            filter: drop-shadow(0 0 0px rgba(0,0,0,0));
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center p-4">
+
+    <!-- App Container (Mobile Sized) -->
+    <div class="w-full max-w-md bg-slate-850 rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-slate-800 pb-6 relative">
+        
+        <!-- Header -->
+        <div class="flex justify-between items-center p-6 pb-2">
+            <div>
+                <h1 class="text-xl font-bold tracking-tight text-white"><i class="fa-solid fa-microchip text-blue-500 mr-2"></i>UM IoT</h1>
+                <p class="text-xs text-slate-400 font-medium tracking-wider uppercase mt-1">Smart Lamp UI</p>
+            </div>
+            <div class="flex items-center bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700 shadow-inner">
+                <div id="conn-dot" class="w-2.5 h-2.5 rounded-full bg-yellow-500 mr-2 animate-pulse"></div>
+                <span id="conn-text" class="text-xs font-semibold text-slate-300">Menghubungkan</span>
+            </div>
+        </div>
+
+        <!-- Hero Status Section -->
+        <div class="flex flex-col items-center justify-center py-8 relative">
+            <!-- Background Glow -->
+            <div id="bg-glow" class="absolute w-40 h-40 bg-yellow-500/10 rounded-full blur-3xl transition-opacity duration-700 opacity-0"></div>
+            
+            <i id="lamp-icon" class="fa-solid fa-lightbulb text-8xl glow-off transition-all duration-700 z-10"></i>
+            
+            <div class="mt-6 text-center z-10">
+                <h2 id="lamp-status-text" class="text-3xl font-bold text-white tracking-wide">OFF</h2>
+                <p id="system-info" class="text-sm text-slate-400 mt-2 px-6 h-5">Sistem Siap</p>
+            </div>
+        </div>
+
+        <!-- Controls Container -->
+        <div class="px-6 space-y-4 flex-1">
+            
+            <!-- Mode Selection -->
+            <div class="glass-card rounded-2xl p-4">
+                <h3 class="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">Mode Operasi</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="setMode('auto')" id="btn-auto" class="py-3 px-4 rounded-xl font-medium text-sm transition-all duration-300 bg-blue-600/20 text-blue-400 border border-blue-500/30 active:scale-95 flex items-center justify-center">
+                        <i class="fa-solid fa-wand-magic-sparkles mr-2"></i> Auto (LDR)
+                    </button>
+                    <button onclick="setMode('manual')" id="btn-manual" class="py-3 px-4 rounded-xl font-medium text-sm transition-all duration-300 bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 active:scale-95 flex items-center justify-center">
+                        <i class="fa-solid fa-hand-pointer mr-2"></i> Manual
+                    </button>
+                </div>
+            </div>
+
+            <!-- Manual Control (Power) -->
+            <div class="glass-card rounded-2xl p-4">
+                <h3 class="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">Kontrol Manual</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="controlLamp('on')" class="py-4 rounded-xl font-bold text-sm bg-gradient-to-br from-green-500 to-green-600 text-white shadow-lg shadow-green-500/20 active:scale-95 transition-all">
+                        <i class="fa-solid fa-power-off mr-1"></i> NYALA
+                    </button>
+                    <button onclick="controlLamp('off')" class="py-4 rounded-xl font-bold text-sm bg-gradient-to-br from-red-500 to-red-600 text-white shadow-lg shadow-red-500/20 active:scale-95 transition-all">
+                        <i class="fa-solid fa-power-off mr-1"></i> MATI
+                    </button>
+                </div>
+            </div>
+
+            <!-- Timer Control -->
+            <div class="glass-card rounded-2xl p-4">
+                <h3 class="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">Timer Otomatis (Mati)</h3>
+                
+                <!-- Quick Timers -->
+                <div class="grid grid-cols-3 gap-2 mb-3">
+                    <button onclick="setTimer(180)" class="py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 active:scale-95 transition-all">3 Jam</button>
+                    <button onclick="setTimer(300)" class="py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 active:scale-95 transition-all">5 Jam</button>
+                    <button onclick="setTimer(480)" class="py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 active:scale-95 transition-all">8 Jam</button>
+                </div>
+
+                <!-- Custom Timer -->
+                <div class="flex gap-2">
+                    <div class="relative flex-1">
+                        <input type="number" id="custom-minutes" placeholder="Menit (Misal: 45)" class="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors">
+                        <i class="fa-regular fa-clock absolute right-4 top-3.5 text-slate-500"></i>
+                    </div>
+                    <button onclick="setCustomTimer()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl text-sm font-semibold active:scale-95 transition-all shadow-lg shadow-blue-500/20">
+                        Set
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Notification Toast (Hidden by default) -->
+    <div id="toast" class="fixed bottom-10 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl border border-slate-700 transform translate-y-20 opacity-0 transition-all duration-300 z-50 flex items-center">
+        <i id="toast-icon" class="fa-solid fa-circle-info text-blue-400 mr-2"></i>
+        <span id="toast-msg" class="text-sm font-medium">Notifikasi</span>
+    </div>
+
+    <script>
+        // --- KONFIGURASI MQTT ---
+        const MQTT_BROKER = "broker.hivemq.com";
+        const MQTT_PORT = 8884; // Port untuk WebSockets Secure (WSS)
+        const CLIENT_ID = "smartlamp8266_Web_" + Math.random().toString(16).substr(2, 8);
+        
+        // Topik yang disesuaikan dengan kode ESP8266
+        const TOPIC_STATUS = "smartlamp_x8266/lamp/status";
+        const TOPIC_MODE = "smartlamp_x8266/lamp/mode";
+        const TOPIC_CONTROL = "smartlamp_x8266/lamp/control";
+        const TOPIC_TIMER = "smartlamp_x8266/lamp/timer";
+
+        let mqttClient;
+        let currentMode = 'auto'; // Default mode sesuai ESP
+
+        // --- DOM ELEMENTS ---
+        const lampIcon = document.getElementById('lamp-icon');
+        const lampStatusText = document.getElementById('lamp-status-text');
+        const bgGlow = document.getElementById('bg-glow');
+        const systemInfo = document.getElementById('system-info');
+        const connDot = document.getElementById('conn-dot');
+        const connText = document.getElementById('conn-text');
+        const btnAuto = document.getElementById('btn-auto');
+        const btnManual = document.getElementById('btn-manual');
+
+        // --- INISIALISASI MQTT ---
+        function initMQTT() {
+            mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, "/mqtt", CLIENT_ID);
+            
+            mqttClient.onConnectionLost = onConnectionLost;
+            mqttClient.onMessageArrived = onMessageArrived;
+
+            const options = {
+                useSSL: true, // Wajib true untuk port 8884 dan HTTPS dan false untuk port 8000
+                timeout: 3,
+                onSuccess: onConnect,
+                onFailure: onFailure
+            };
+
+            updateConnectionStatus('connecting');
+            mqttClient.connect(options);
+        }
+
+        // --- MQTT CALLBACKS ---
+        function onConnect() {
+            console.log("MQTT Connected!");
+            updateConnectionStatus('connected');
+            // Subscribe ke topik status dari ESP8266
+            mqttClient.subscribe(TOPIC_STATUS);
+            showToast("Terhubung ke Sistem", "success");
+        }
+
+        function onFailure(error) {
+            console.log("Koneksi Gagal: " + error.errorMessage);
+            updateConnectionStatus('disconnected');
+            showToast("Koneksi gagal. Mencoba ulang...", "error");
+            setTimeout(initMQTT, 5000); // Coba lagi dalam 5 detik
+        }
+
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("Koneksi Terputus: " + responseObject.errorMessage);
+                updateConnectionStatus('disconnected');
+                showToast("Koneksi terputus!", "error");
+                setTimeout(initMQTT, 5000);
+            }
+        }
+
+        // Menerima pesan balasan dari ESP8266
+        function onMessageArrived(message) {
+            console.log("Pesan diterima: " + message.payloadString + " pada topik " + message.destinationName);
+            const msg = message.payloadString.trim();
+
+            if (msg === "ON") {
+                updateLampUI(true);
+            } else if (msg === "OFF") {
+                updateLampUI(false);
+            } else {
+                // Info lain seperti "Timer aktif:...", "Mode Berubah:..."
+                systemInfo.innerText = msg;
+                systemInfo.classList.remove('text-slate-400');
+                systemInfo.classList.add('text-blue-400');
+                setTimeout(() => {
+                    systemInfo.classList.add('text-slate-400');
+                    systemInfo.classList.remove('text-blue-400');
+                }, 3000);
+                
+                // Jika pesan adalah perubahan mode, sesuaikan tombol
+                if(msg.includes("AUTO")) updateModeUI('auto');
+                if(msg.includes("MANUAL")) updateModeUI('manual');
+            }
+        }
+
+        // --- FUNGSI PENGIRIMAN PERINTAH (PUBLISH) ---
+        function publishMessage(topic, payload) {
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message(payload);
+                message.destinationName = topic;
+                mqttClient.send(message);
+                console.log(`Mengirim [${topic}]: ${payload}`);
+            } else {
+                showToast("Sistem belum terhubung!", "error");
+            }
+        }
+
+        // Kontrol Tombol Mode
+        function setMode(mode) {
+            publishMessage(TOPIC_MODE, mode);
+            updateModeUI(mode);
+            if(mode === 'auto') {
+                showToast("Mode Otomatis (LDR) Aktif", "info");
+            } else {
+                showToast("Mode Manual Aktif", "info");
+            }
+        }
+
+        // Kontrol Tombol Nyala/Mati
+        function controlLamp(state) {
+            publishMessage(TOPIC_CONTROL, state);
+            // ESP akan merespons dengan mode otomatis ke manual saat ini ditekan
+            updateModeUI('manual'); 
+        }
+
+        // Kontrol Tombol Timer
+        function setTimer(minutes) {
+            publishMessage(TOPIC_TIMER, minutes.toString());
+            updateModeUI('manual');
+            showToast(`Timer diatur selama ${minutes} menit`, "info");
+        }
+
+        function setCustomTimer() {
+            const min = document.getElementById('custom-minutes').value;
+            if (min && min > 0) {
+                setTimer(min);
+                document.getElementById('custom-minutes').value = ''; // Reset input
+            } else {
+                showToast("Masukkan angka menit yang valid!", "error");
+            }
+        }
+
+        // --- FUNGSI UPDATE UI ---
+        function updateLampUI(isOn) {
+            if (isOn) {
+                lampIcon.classList.remove('glow-off');
+                lampIcon.classList.add('glow-on');
+                bgGlow.classList.remove('opacity-0');
+                bgGlow.classList.add('opacity-100');
+                lampStatusText.innerText = "ON";
+                lampStatusText.classList.remove('text-white');
+                lampStatusText.classList.add('text-yellow-400');
+            } else {
+                lampIcon.classList.remove('glow-on');
+                lampIcon.classList.add('glow-off');
+                bgGlow.classList.remove('opacity-100');
+                bgGlow.classList.add('opacity-0');
+                lampStatusText.innerText = "OFF";
+                lampStatusText.classList.remove('text-yellow-400');
+                lampStatusText.classList.add('text-white');
+            }
+        }
+
+        function updateModeUI(mode) {
+            currentMode = mode;
+            if (mode === 'auto') {
+                // Style Aktif Auto
+                btnAuto.className = "py-3 px-4 rounded-xl font-medium text-sm transition-all duration-300 bg-blue-600/20 text-blue-400 border border-blue-500/50 active:scale-95 flex items-center justify-center shadow-[0_0_10px_rgba(59,130,246,0.3)]";
+                // Style Pasif Manual
+                btnManual.className = "py-3 px-4 rounded-xl font-medium text-sm transition-all duration-300 bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 active:scale-95 flex items-center justify-center";
+            } else {
+                // Style Pasif Auto
+                btnAuto.className = "py-3 px-4 rounded-xl font-medium text-sm transition-all duration-300 bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 active:scale-95 flex items-center justify-center";
+                // Style Aktif Manual
+                btnManual.className = "py-3 px-4 rounded-xl font-medium text-sm transition-all duration-300 bg-blue-600/20 text-blue-400 border border-blue-500/50 active:scale-95 flex items-center justify-center shadow-[0_0_10px_rgba(59,130,246,0.3)]";
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            connDot.className = "w-2.5 h-2.5 rounded-full mr-2 ";
+            if (status === 'connecting') {
+                connDot.classList.add('bg-yellow-500', 'animate-pulse');
+                connText.innerText = "Menghubungkan";
+            } else if (status === 'connected') {
+                connDot.classList.add('bg-green-500');
+                connDot.classList.add('shadow-[0_0_8px_rgba(34,197,94,0.8)]'); // Neon green glow
+                connText.innerText = "Terhubung";
+            } else {
+                connDot.classList.add('bg-red-500');
+                connText.innerText = "Terputus";
+            }
+        }
+
+        let toastTimeout;
+        function showToast(message, type = "info") {
+            const toast = document.getElementById('toast');
+            const msg = document.getElementById('toast-msg');
+            const icon = document.getElementById('toast-icon');
+
+            msg.innerText = message;
+            
+            if(type === "success") {
+                icon.className = "fa-solid fa-circle-check text-green-400 mr-2";
+            } else if (type === "error") {
+                icon.className = "fa-solid fa-triangle-exclamation text-red-400 mr-2";
+            } else {
+                icon.className = "fa-solid fa-circle-info text-blue-400 mr-2";
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // --- MULAI KONEKSI SAAT HALAMAN DIMUAT ---
+        window.onload = () => {
+            initMQTT();
+            updateModeUI('auto'); // Set visual default
+        };
+</script>
+</body>
+</html>
