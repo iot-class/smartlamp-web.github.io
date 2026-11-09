@@ -95,6 +95,10 @@
             
             <div class="mt-6 text-center z-10">
                 <h2 id="lamp-status-text" class="text-3xl font-bold text-white tracking-wide">OFF</h2>
+                <div id="countdown-display" class="hidden mt-2 inline-flex items-center justify-center bg-blue-500/20 border border-blue-500/50 text-blue-300 text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm shadow-[0_0_10px_rgba(59,130,246,0.2)]">
+                    <i class="fa-solid fa-stopwatch text-blue-400 mr-2 animate-pulse"></i> 
+                <span id="countdown-text">Mati dalam 00:00:00</span>
+                </div>
                 <p id="system-info" class="text-sm text-slate-400 mt-2 px-6 h-5">Sistem Siap</p>
             </div>
         </div>
@@ -174,6 +178,7 @@
 
         let mqttClient;
         let currentMode = 'auto'; // Default mode sesuai ESP
+        let countdownInterval = null;
 
         // --- DOM ELEMENTS ---
         const lampIcon = document.getElementById('lamp-icon');
@@ -184,6 +189,47 @@
         const connText = document.getElementById('conn-text');
         const btnAuto = document.getElementById('btn-auto');
         const btnManual = document.getElementById('btn-manual');
+
+        
+
+function startCountdown(minutes) {
+    clearInterval(countdownInterval); // Hapus timer lama jika ada
+    const targetTime = Date.now() + (minutes * 60000); // Konversi menit ke milidetik
+    
+    const cdDisplay = document.getElementById('countdown-display');
+    const cdText = document.getElementById('countdown-text');
+    cdDisplay.classList.remove('hidden');
+
+    countdownInterval = setInterval(() => {
+        const remaining = targetTime - Date.now();
+        
+        if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            cdText.innerText = "Waktu Habis";
+            setTimeout(() => cdDisplay.classList.add('hidden'), 3000);
+            return;
+        }
+
+        // Konversi ke Jam:Menit:Detik
+        const h = Math.floor((remaining / (1000 * 60 * 60)) % 24);
+        const m = Math.floor((remaining / 1000 / 60) % 60);
+        const s = Math.floor((remaining / 1000) % 60);
+
+        // Format angka (tambahkan 0 di depan jika di bawah 10)
+        const formatZero = (num) => (num < 10 ? "0" + num : num);
+        
+        if (h > 0) {
+            cdText.innerText = `Mati dalam ${formatZero(h)}:${formatZero(m)}:${formatZero(s)}`;
+        } else {
+            cdText.innerText = `Mati dalam ${formatZero(m)}:${formatZero(s)}`;
+        }
+    }, 1000);
+}
+
+function stopCountdown() {
+    clearInterval(countdownInterval);
+    document.getElementById('countdown-display').classList.add('hidden');
+}
 
         // --- INISIALISASI MQTT ---
         function initMQTT() {
@@ -248,8 +294,17 @@
                 }, 3000);
                 
                 // Jika pesan adalah perubahan mode, sesuaikan tombol
-                if(msg.includes("AUTO")) updateModeUI('auto');
-                if(msg.includes("MANUAL")) updateModeUI('manual');
+                if(msg.includes("AUTO")) updateModeUI('auto'); stopCountdown();
+                if(msg.includes("MANUAL")) updateModeUI('manual'); stopCountdown();
+
+                // TANGKAP TIMER DARI PERANGKAT LAIN / ACCESS POINT
+                let matchMin = msg.match(/Timer aktif: (\d+) menit/i);
+                if (matchMin) startCountdown(parseInt(matchMin[1]));
+
+                let matchHour = msg.match(/Timer AP Aktif: (\d+) Jam/i);
+                if (matchHour) startCountdown(parseInt(matchHour[1]) * 60);
+
+                if (msg.includes("Habis")) stopCountdown();
             }
         }
 
@@ -269,6 +324,7 @@
         function setMode(mode) {
             publishMessage(TOPIC_MODE, mode);
             updateModeUI(mode);
+            stopCountdown();
             if(mode === 'auto') {
                 showToast("Mode Otomatis (LDR) Aktif", "info");
             } else {
@@ -281,12 +337,14 @@
             publishMessage(TOPIC_CONTROL, state);
             // ESP akan merespons dengan mode otomatis ke manual saat ini ditekan
             updateModeUI('manual'); 
+            stopCountdown();
         }
 
         // Kontrol Tombol Timer
         function setTimer(minutes) {
             publishMessage(TOPIC_TIMER, minutes.toString());
             updateModeUI('manual');
+            startCountdown(minutes);
             showToast(`Timer diatur selama ${minutes} menit`, "info");
         }
 
